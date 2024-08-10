@@ -4,7 +4,7 @@
 # Copyright 2012-2015 Stanford University and the Authors
 #
 # Authors: Christoph Klein
-# Contributors:
+# Contributors:Stefan Hervø-Hansen
 #
 # MDTraj is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License as
@@ -24,8 +24,9 @@ import numpy as np
 
 from mdtraj.geometry.distance import compute_distances, compute_distances_t
 from mdtraj.utils import ensure_type
+from mdtraj.geometry.sdf import compute_local_density
 
-__all__ = ["compute_rdf", "compute_rdf_t"]
+__all__ = ["compute_rdf", "compute_rdf_t", "compute_proximal_rdf"]
 
 
 def compute_rdf(
@@ -221,3 +222,81 @@ def compute_rdf_t(
     g_r_t_final = np.average(g_r_t, axis=0, weights=weights)
 
     return r, g_r_t_final
+
+
+def compute_proximal_rdf(
+    traj,
+    pairs,
+    r_range=None,
+    bin_width=0.005,
+    n_bins=None,
+    periodic=True,
+    opt=True,
+):
+    """Compute proximal radial distribution functions for pairs in every frame.
+
+    Parameters
+    ----------
+    traj : Trajectory
+        Trajectory to compute radial distribution function in.
+    pairs : array-like, shape=(n_pairs, 2), dtype=int
+        Each row gives the indices of two atoms.
+    r_range : array-like, shape=(2,), optional, default=(0.0, 1.0)
+        Minimum and maximum radii.
+    bin_width : float, optional, default=0.005
+        Width of the bins in nanometers.
+    n_bins : int, optional, default=None
+        The number of bins. If specified, this will override the `bin_width`
+         parameter.
+    periodic : bool, default=True
+        If `periodic` is True and the trajectory contains unitcell
+        information, we will compute distances under the minimum image
+        convention.
+    opt : bool, default=True
+        Use an optimized native library to compute the pair wise distances.
+
+    Returns
+    -------
+    r : np.ndarray, shape=(np.diff(r_range) / bin_width - 1), dtype=float
+        Radii values corresponding to the centers of the bins.
+    g_r : np.ndarray, shape=(np.diff(r_range) / bin_width - 1), dtype=float
+        Radial distribution function values at r.
+
+    See also
+    --------
+    Topology.select_pairs
+
+    """
+    if r_range is None:
+        r_range = np.array([0.0, 1.0])
+    r_range = ensure_type(
+        r_range,
+        dtype=np.float64,
+        ndim=1,
+        name="r_range",
+        shape=(2,),
+        warn_on_cast=False,
+    )
+    if n_bins is not None:
+        n_bins = int(n_bins)
+        if n_bins <= 0:
+            raise ValueError("`n_bins` must be a positive integer")
+    else:
+        n_bins = int((r_range[1] - r_range[0]) / bin_width)
+        
+    reference_indices = sorted(set([reference for reference, _ in pairs]))
+    target_indices = sorted(set([target for _, target in pairs]))
+
+    distances = compute_distances(traj, pairs, periodic=periodic, opt=opt)
+    distance_matrix = distances.reshape(len(reference_indices), len(target_indices))
+    min_distances = np.min(distance_matrix, axis=1)
+    
+    g_r, edges = np.histogram(min_distances, range=r_range, bins=n_bins)
+    r = 0.5 * (edges[1:] + edges[:-1])
+
+    # Normalization
+    local_density = compute_local_density(traj, solute_indices, radius=range[1])
+    bin_volumes = np.pi * (np.diff(bin_edges)**3) / 3
+    norm = local_density * bin_volumes
+    g_r = g_r.astype(np.float64) / norm  # From int64.
+    return r, g_r

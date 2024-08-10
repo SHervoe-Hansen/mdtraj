@@ -36,6 +36,7 @@ from .rg import *
 from .sasa import *
 from .shape import *
 from .thermodynamic_properties import *
+from .sdf import *
 
 __all__ = [
     "baker_hubbard",
@@ -79,4 +80,6 @@ __all__ = [
     "isothermal_compressability_kappa_T",
     "thermal_expansion_alpha_P",
     "density",
+    "compute_local_density",
+    "compute_proximal_rdf"
 ]
